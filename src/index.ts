@@ -5,20 +5,28 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 
-const LASTFM_USER = "YOUR_LASTFM_USERNAME";
-const LASTFM_API_KEY = "YOUR_LASTFM_API_KEY";
-const DISCORD_CLIENT_ID = "YOUR_DISCORD_CLIENT_ID";
+import { PluginConfig, defaultConfig } from "./config";
+import { getSettings } from "./settings";
+
+let config: PluginConfig = { ...defaultConfig };
+let rpc: RPC.Client | null = null;
+let interval: NodeJS.Timeout | null = null;
 
 const CACHE_DIR = "./cache";
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 
-let rpc: RPC.Client | null = null;
-let interval: NodeJS.Timeout | null = null;
+function hasValidConfig() {
+  return (
+    config.lastfmUser &&
+    config.lastfmApiKey &&
+    config.discordClientId
+  );
+}
 
 async function getNowPlaying() {
   const url =
     `https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks` +
-    `&user=${LASTFM_USER}&api_key=${LASTFM_API_KEY}&format=json&limit=1`;
+    `&user=${config.lastfmUser}&api_key=${config.lastfmApiKey}&format=json&limit=1`;
 
   const res = await fetch(url);
   const json = await res.json();
@@ -60,7 +68,7 @@ async function uploadToCatbox(imageUrl: string): Promise<string> {
 }
 
 async function updatePresence() {
-  if (!rpc) return;
+  if (!rpc || !hasValidConfig()) return;
 
   const now = await getNowPlaying();
   if (!now || !now.image) {
@@ -79,11 +87,9 @@ async function updatePresence() {
   });
 }
 
-/* =========================
-   RevengeCord Plugin Hooks
-   ========================= */
+function startRpc() {
+  if (!hasValidConfig()) return;
 
-export function start() {
   rpc = new RPC.Client({ transport: "ipc" });
 
   rpc.on("ready", () => {
@@ -91,18 +97,36 @@ export function start() {
     updatePresence();
   });
 
-  rpc.login({ clientId: DISCORD_CLIENT_ID });
+  rpc.login({ clientId: config.discordClientId });
 }
 
-export function stop() {
-  if (interval) {
-    clearInterval(interval);
-    interval = null;
-  }
+function stopRpc() {
+  if (interval) clearInterval(interval);
+  interval = null;
 
   if (rpc) {
     rpc.clearActivity();
     rpc.destroy();
-    rpc = null;
   }
+  rpc = null;
+}
+
+/* ======================
+   Plugin API Exports
+   ====================== */
+
+export function start() {
+  startRpc();
+}
+
+export function stop() {
+  stopRpc();
+}
+
+export function settings() {
+  return getSettings(config, (newConfig) => {
+    config = newConfig;
+    stopRpc();
+    startRpc();
+  });
 }

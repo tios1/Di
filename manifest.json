@@ -1,0 +1,12 @@
+{
+  "name": "Last.fm Catbox RPC",
+  "id": "lastfm-catbox-rpc",
+  "version": "1.0.0",
+  "description": "Discord Rich Presence using Last.fm with real album art via Catbox",
+  "author": "Tios",
+  "entry": "dist/index.js",
+  "type": "rpc",
+  "permissions": [
+    "rpc"
+  ]
+}

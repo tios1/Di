@@ -7,12 +7,13 @@ import crypto from "crypto";
 
 const LASTFM_USER = "YOUR_LASTFM_USERNAME";
 const LASTFM_API_KEY = "YOUR_LASTFM_API_KEY";
-const DISCORD_CLIENT_ID = "YOUR_DISCORD_APP_CLIENT_ID";
+const DISCORD_CLIENT_ID = "YOUR_DISCORD_CLIENT_ID";
 
 const CACHE_DIR = "./cache";
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 
-const rpc = new RPC.Client({ transport: "ipc" });
+let rpc: RPC.Client | null = null;
+let interval: NodeJS.Timeout | null = null;
 
 async function getNowPlaying() {
   const url =
@@ -22,8 +23,8 @@ async function getNowPlaying() {
   const res = await fetch(url);
   const json = await res.json();
 
-  const track = json.recenttracks.track[0];
-  if (!track["@attr"]?.nowplaying) return null;
+  const track = json.recenttracks?.track?.[0];
+  if (!track || !track["@attr"]?.nowplaying) return null;
 
   return {
     title: track.name,
@@ -53,14 +54,19 @@ async function uploadToCatbox(imageUrl: string): Promise<string> {
     body: form as any
   });
 
-  const url = await res.text();
+  const url = (await res.text()).trim();
   fs.writeFileSync(cached, url);
   return url;
 }
 
 async function updatePresence() {
+  if (!rpc) return;
+
   const now = await getNowPlaying();
-  if (!now || !now.image) return rpc.clearActivity();
+  if (!now || !now.image) {
+    rpc.clearActivity();
+    return;
+  }
 
   const imageUrl = await uploadToCatbox(now.image);
 
@@ -73,9 +79,30 @@ async function updatePresence() {
   });
 }
 
-rpc.on("ready", () => {
-  console.log("RPC connected");
-  setInterval(updatePresence, 15_000);
-});
+/* =========================
+   RevengeCord Plugin Hooks
+   ========================= */
 
-rpc.login({ clientId: DISCORD_CLIENT_ID });
+export function start() {
+  rpc = new RPC.Client({ transport: "ipc" });
+
+  rpc.on("ready", () => {
+    interval = setInterval(updatePresence, 15_000);
+    updatePresence();
+  });
+
+  rpc.login({ clientId: DISCORD_CLIENT_ID });
+}
+
+export function stop() {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
+
+  if (rpc) {
+    rpc.clearActivity();
+    rpc.destroy();
+    rpc = null;
+  }
+}
